@@ -1,0 +1,119 @@
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+import webbrowser
+import os
+
+# 銘柄と名前の定義
+ticker = '9434.T'
+ticker_name = 'ソフトバンク'
+
+# データの取得
+end_date = datetime.now()
+start_date = end_date - timedelta(days=365 * 10)  # 過去10年
+df = yf.download(ticker, start=start_date, end=end_date)
+
+# 列名をPlotlyが認識できる形式にリネーム
+try:
+    df.columns = df.columns.droplevel(1)
+except (AttributeError, KeyError):
+    pass
+
+column_mapping = {
+    'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume',
+    'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume',
+    ('Open',): 'Open', ('High',): 'High', ('Low',): 'Low', ('Close',): 'Close', ('Volume',): 'Volume',
+}
+df = df.rename(columns=column_mapping)
+df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+# --- チャートデータ生成関数 ---
+def create_chart_data(data):
+    if data.empty:
+        return None, None, None
+
+    # ローソク足
+    candlestick_trace = go.Candlestick(
+        x=data.index,
+        open=data['Open'],
+        high=data['High'],
+        low=data['Low'],
+        close=data['Close'],
+        showlegend=False  # 凡例を非表示に設定
+    )
+    
+    # 移動平均線
+    data['MA25'] = data['Close'].rolling(window=25).mean()
+    data['MA75'] = data['Close'].rolling(window=75).mean()
+    ma25_trace = go.Scatter(x=data.index, y=data['MA25'], mode='lines', line=dict(color='orange'), showlegend=False) # 凡例を非表示に設定
+    ma75_trace = go.Scatter(x=data.index, y=data['MA75'], mode='lines', line=dict(color='green'), showlegend=False) # 凡例を非表示に設定
+
+    return candlestick_trace, ma25_trace, ma75_trace
+
+# --- 各期間のデータを作成 ---
+df_day = df.loc[end_date - timedelta(days=180):]
+day_candlestick, day_ma25, day_ma75 = create_chart_data(df_day)
+
+df_week = df.loc[end_date - timedelta(days=365 * 2):].resample('W').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'})
+week_candlestick, week_ma25, week_ma75 = create_chart_data(df_week)
+
+df_month = df.loc[start_date:].resample('ME').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'})
+month_candlestick, month_ma25, month_ma75 = create_chart_data(df_month)
+
+# --- 3つのチャートを縦に並べて表示 ---
+if all([day_candlestick, week_candlestick, month_candlestick]):
+    fig = make_subplots(
+        rows=3, 
+        cols=1, 
+        subplot_titles=[
+            f'{ticker_name} - 日足 (6ヶ月)', 
+            f'{ticker_name} - 週足 (2年)', 
+            f'{ticker_name} - 月足 (10年)'
+        ],
+        vertical_spacing=0.1
+    )
+
+    fig.add_trace(day_candlestick, row=1, col=1)
+    fig.add_trace(day_ma25, row=1, col=1)
+    fig.add_trace(day_ma75, row=1, col=1)
+    
+    fig.add_trace(week_candlestick, row=2, col=1)
+    fig.add_trace(week_ma25, row=2, col=1)
+    fig.add_trace(week_ma75, row=2, col=1)
+    
+    fig.add_trace(month_candlestick, row=3, col=1)
+    fig.add_trace(month_ma25, row=3, col=1)
+    fig.add_trace(month_ma75, row=3, col=1)
+
+    fig.update_layout(
+        template='plotly_dark',
+        height=1800,
+        showlegend=False, # メインレイアウトの凡例も非表示に設定
+        title_text=f"<b>{ticker_name}</b>",
+        xaxis_rangeslider_visible=False
+    )
+    
+    fig.update_yaxes(title_text="株価", row=1, col=1)
+    fig.update_yaxes(title_text="株価", row=2, col=1)
+    fig.update_yaxes(title_text="株価", row=3, col=1)
+
+    # --- 保存先のフォルダとファイル名を指定 ---
+    folder_path = "D:\\VS code\\動的html"
+    file_name = "stock_charts.html"
+    file_path = os.path.join(folder_path, file_name)
+    
+    # フォルダが存在しない場合は作成
+    os.makedirs(folder_path, exist_ok=True)
+
+    # HTMLファイルとして保存
+    fig.write_html(file_path)
+
+    # 生成したHTMLファイルを自動的にブラウザで開く
+    try:
+        webbrowser.open(file_path)
+        print(f"チャートは {file_path} に保存され、ブラウザで開かれました。")
+    except Exception as e:
+        print(f"ブラウザを開く際にエラーが発生しました: {e}")
+        print(f"ファイルは {file_path} に保存されました。手動で開いてください。")

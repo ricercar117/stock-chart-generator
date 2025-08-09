@@ -1,0 +1,138 @@
+import pandas as pd
+import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
+import webbrowser
+import os
+
+# 銘柄と名前の定義
+ticker = '9434.T'
+ticker_name = 'ソフトバンク'
+
+# データの取得
+end_date = datetime.now()
+start_date = end_date - timedelta(days=365 * 10)  # 過去10年
+df = yf.download(ticker, start=start_date, end=end_date)
+
+# 列名をPlotlyが認識できる形式にリネーム
+try:
+    df.columns = df.columns.droplevel(1)
+except (AttributeError, KeyError):
+    pass
+
+column_mapping = {
+    'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume',
+    'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume',
+    ('Open',): 'Open', ('High',): 'High', ('Low',): 'Low', ('Close',): 'Close', ('Volume',): 'Volume',
+}
+df = df.rename(columns=column_mapping)
+df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+
+def create_chart(data, title):
+    if data.empty:
+        return None
+
+    fig = go.Figure(data=[
+        go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name='株価'
+        )
+    ])
+    
+    fig.update_layout(
+        title=f'<b>{ticker_name}</b> - {title}',
+        yaxis_title='株価',
+        xaxis_rangeslider_visible=False,
+        template='plotly_dark',
+        height=600,
+        showlegend=False  # 凡例を非表示に設定
+    )
+    
+    data['MA25'] = data['Close'].rolling(window=25).mean()
+    data['MA75'] = data['Close'].rolling(window=75).mean()
+    fig.add_trace(go.Scatter(x=data.index, y=data['MA25'], mode='lines', name='25MA', line=dict(color='orange')))
+    fig.add_trace(go.Scatter(x=data.index, y=data['MA75'], mode='lines', name='75MA', line=dict(color='green')))
+
+    return fig
+
+# --- 各期間のデータを作成 ---
+
+# 1. 日足6ヵ月
+df_day = df.loc[end_date - timedelta(days=180):]
+fig_day = create_chart(df_day, '日足 (6ヶ月)')
+
+# 2. 週足2年
+df_week = df.loc[end_date - timedelta(days=365 * 2):].resample('W').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'})
+fig_week = create_chart(df_week, '週足 (2年)')
+
+# 3. 月足10年
+# 'M'を'ME'に変更して警告を解消
+df_month = df.loc[start_date:].resample('ME').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'})
+fig_month = create_chart(df_month, '月足 (10年)')
+
+# --- 3つのチャートを縦に並べて表示 ---
+
+if fig_day and fig_week and fig_month:
+    
+    fig = make_subplots(
+        rows=3, 
+        cols=1, 
+        subplot_titles=['ソフトバンク - 日足 (6ヶ月)', 'ソフトバンク - 週足 (2年)', 'ソフトバンク - 月足 (10年)'],
+        vertical_spacing=0.1
+    )
+
+    # 日足チャートを追加
+    for trace in fig_day.data:
+        fig.add_trace(trace, row=1, col=1)
+    
+    # 週足チャートを追加
+    for trace in fig_week.data:
+        fig.add_trace(trace, row=2, col=1)
+    
+    # 月足チャートを追加（凡例を統合）
+    for trace in fig_month.data:
+        # 月足チャートのローソク足と移動平均線はshowlegendを有効化し、legendgroupで統合
+        if trace.name == '株価':
+            trace.update(showlegend=True, legendgroup='1')
+        elif trace.name == '25MA':
+            trace.update(showlegend=True, legendgroup='1')
+        elif trace.name == '75MA':
+            trace.update(showlegend=True, legendgroup='1')
+        fig.add_trace(trace, row=3, col=1)
+
+    fig.update_layout(
+        template='plotly_dark',
+        height=1800,
+        showlegend=True, # メインのレイアウトで凡例を有効化
+        title_text=f"<b>{ticker_name}</b>",
+        xaxis_rangeslider_visible=False
+    )
+    
+    fig.update_yaxes(title_text="株価", row=1, col=1)
+    fig.update_yaxes(title_text="株価", row=2, col=1)
+    fig.update_yaxes(title_text="株価", row=3, col=1)
+
+    # --- 保存先のフォルダとファイル名を指定 ---
+    folder_path = "D:\\VS code\\動的html"
+    file_name = "stock_charts.html"
+    file_path = os.path.join(folder_path, file_name)
+    
+    # フォルダが存在しない場合は作成
+    os.makedirs(folder_path, exist_ok=True)
+
+    # HTMLファイルとして保存
+    fig.write_html(file_path)
+
+    # 生成したHTMLファイルを自動的にブラウザで開く
+    try:
+        webbrowser.open(file_path)
+        print(f"チャートは {file_path} に保存され、ブラウザで開かれました。")
+    except Exception as e:
+        print(f"ブラウザを開く際にエラーが発生しました: {e}")
+        print(f"ファイルは {file_path} に保存されました。手動で開いてください。")
