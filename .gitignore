@@ -1,0 +1,9 @@
+# Generated files by the script
+charts/
+
+# Python specific
+__pycache__/
+*.pyc
+
+# IDE settings
+.vscode/
